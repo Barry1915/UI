@@ -1,0 +1,36 @@
+@use "sass:color";
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;400;500;700&display=swap');
+
+:root {
+  --ink: #1d1b16;
+  --jade: #1f8a70;
+  --bamboo: #2f6f4e;
+  --rice: #f3efe3;
+  --paper: #fbfaf5;
+  --cinnabar: #c0392b;
+  --gold: #c7a45b;
+}
+
+* { box-sizing: border-box; }
+html, body, #app { height: 100%; margin: 0; }
+body {
+  font-family: 'Noto Serif SC', serif;
+  color: var(--ink);
+  background: var(--paper);
+}
+
+.button-primary {
+  padding: 8px 16px;
+  background: linear-gradient(135deg, var(--bamboo), var(--jade));
+  color: white;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.card {
+  background: white;
+  border-radius: 12px;
+  border: 1px solid #ece7da;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+}
