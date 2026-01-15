@@ -3,3 +3,6 @@ frontend/dist/
 backend/target/
 .h2/
 *.log
+__pycache__/
+*.pyc
+.venv/
