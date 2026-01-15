@@ -6,6 +6,10 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/PublicHome.vue')
   },
   {
+    path: '/pvz',
+    component: () => import('@/views/PvzGame.vue')
+  },
+  {
     path: '/admin',
     component: () => import('@/views/admin/AdminLayout.vue'),
     children: [
