@@ -1,0 +1,19 @@
+version: "3.8"
+services:
+  pvz-backend:
+    build:
+      context: ./pvz_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+
+  pvz-web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - pvz-backend
+    ports:
+      - "8088:80"
+
