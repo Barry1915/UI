@@ -32,29 +32,19 @@
       <aside class="panel card">
         <div class="panel-title">植物卡片</div>
         <div class="cards">
-          <button class="card-btn" :class="{ active: selected === 'sunflower' }" @click="selected = 'sunflower'">
-            <div class="plant-icon sunflower" />
+          <button
+            v-for="item in plantCatalog"
+            :key="item.type"
+            class="card-btn"
+            :class="{ active: selected === item.type, disabled: (game?.sun ?? 0) < item.cost }"
+            @click="selected = item.type"
+          >
+            <div class="plant-icon" :class="item.type" />
             <div class="txt">
-              <div class="name">向日葵</div>
-              <div class="desc">产出阳光</div>
+              <div class="name">{{ item.name }}</div>
+              <div class="desc">{{ item.desc }}</div>
             </div>
-            <div class="cost">50</div>
-          </button>
-          <button class="card-btn" :class="{ active: selected === 'peashooter' }" @click="selected = 'peashooter'">
-            <div class="plant-icon peashooter" />
-            <div class="txt">
-              <div class="name">豌豆射手</div>
-              <div class="desc">自动射击</div>
-            </div>
-            <div class="cost">100</div>
-          </button>
-          <button class="card-btn" :class="{ active: selected === 'wallnut' }" @click="selected = 'wallnut'">
-            <div class="plant-icon wallnut" />
-            <div class="txt">
-              <div class="name">坚果墙</div>
-              <div class="desc">高生命值</div>
-            </div>
-            <div class="cost">50</div>
+            <div class="cost">{{ item.cost }}</div>
           </button>
         </div>
 
@@ -82,7 +72,9 @@
             <span class="chip plant">植物</span>
             <span class="chip zombie">僵尸</span>
             <span class="chip pea">豌豆</span>
+            <span class="chip ice">寒冰</span>
             <span class="chip sun">阳光</span>
+            <span class="chip boom">爆炸</span>
           </div>
           <div class="right">
             <span class="muted">提示：开局默认 150 阳光</span>
@@ -134,13 +126,23 @@
               v-for="p in game?.projectiles ?? []"
               :key="`pea-${p.id}`"
               class="pea"
+              :class="p.kind"
               :style="entityStyle(p.x, p.row + 0.42)"
+            />
+
+            <div
+              v-for="e in game?.effects ?? []"
+              :key="`fx-${e.id}`"
+              class="fx"
+              :class="e.type"
+              :style="entityStyle(e.col + 0.05, e.row + 0.05)"
             />
 
             <div
               v-for="z in game?.zombies ?? []"
               :key="`z-${z.id}`"
               class="zombie"
+              :class="{ slowed: z.slowed }"
               :style="entityStyle(z.x, z.row + 0.14)"
             >
               <div class="z-head" />
@@ -199,7 +201,19 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
-type PlantType = 'peashooter' | 'sunflower' | 'wallnut'
+type PlantType =
+  | 'peashooter'
+  | 'repeater'
+  | 'snowpea'
+  | 'sunflower'
+  | 'twin_sunflower'
+  | 'wallnut'
+  | 'cherrybomb'
+  | 'chomper'
+  | 'spikeweed'
+
+type PlantCatalogItem = { type: PlantType; name: string; desc: string; cost: number; hpMax: number }
+type Effect = { id: number; type: 'explosion' | 'chomp'; row: number; col: number; expiresAtTick: number; radius?: number }
 
 type GameState = {
   tick: number
@@ -209,10 +223,12 @@ type GameState = {
   sun: number
   difficulty: number
   config: { rows: number; cols: number; tickMs: number }
+  plantCatalog: PlantCatalogItem[]
   plants: Array<{ id: number; type: PlantType; row: number; col: number; hp: number }>
-  zombies: Array<{ id: number; row: number; x: number; hp: number }>
-  projectiles: Array<{ id: number; row: number; x: number }>
+  zombies: Array<{ id: number; row: number; x: number; hp: number; slowed?: boolean }>
+  projectiles: Array<{ id: number; row: number; x: number; kind?: 'pea' | 'snow' }>
   sunTokens: Array<{ id: number; row: number; col: number; value: number; expiresAtTick: number }>
+  effects: Effect[]
 }
 
 const wsStatus = ref<'disconnected' | 'connecting' | 'connected'>('disconnected')
@@ -226,6 +242,22 @@ const selected = ref<PlantType>('peashooter')
 const difficulty = ref<number>(1)
 const notice = ref<string>('')
 const logs = ref<string[]>([])
+
+const plantCatalog = computed<PlantCatalogItem[]>(() => {
+  const fromServer = game.value?.plantCatalog
+  if (fromServer && fromServer.length) return fromServer
+  return [
+    { type: 'sunflower', name: '向日葵', desc: '稳定产出阳光', cost: 50, hpMax: 4 },
+    { type: 'peashooter', name: '豌豆射手', desc: '自动射击', cost: 100, hpMax: 5 },
+    { type: 'wallnut', name: '坚果墙', desc: '高生命值，阻挡僵尸', cost: 50, hpMax: 18 },
+  ]
+})
+
+const hpMaxMap = computed(() => {
+  const m = new Map<PlantType, number>()
+  for (const item of plantCatalog.value) m.set(item.type, item.hpMax)
+  return m
+})
 
 const plantMap = computed(() => {
   const m = new Map<string, GameState['plants'][number]>()
@@ -279,6 +311,10 @@ function connect() {
       if (msg.type === 'hello') {
         game.value = msg.state
         difficulty.value = msg.state.difficulty ?? 1
+        if (msg.state.plantCatalog?.length) {
+          const first = msg.state.plantCatalog[0]?.type
+          if (first) selected.value = first
+        }
         pushLog('收到初始状态')
         return
       }
@@ -294,6 +330,9 @@ function connect() {
           if (err === 'not_enough_sun') showNotice(`阳光不足（需要 ${msg.need}，当前 ${msg.have}）`)
           else if (err === 'cell_occupied') showNotice('该格子已有植物')
           else showNotice(`放置失败：${err}`)
+        }
+        if (msg.action === 'place' && msg.ok === true) {
+          pushLog(`放置：${selected.value}`)
         }
         if (msg.action === 'collectSun' && msg.ok === true) pushLog(`拾取阳光 +${msg.value}`)
         return
@@ -356,7 +395,7 @@ function entityStyle(x: number, y: number) {
 }
 
 function hpWidth(hp: number, type: PlantType) {
-  const max = type === 'wallnut' ? 18 : type === 'peashooter' ? 5 : 4
+  const max = hpMaxMap.value.get(type) ?? 5
   const pct = Math.max(0, Math.min(1, hp / max))
   return `${Math.round(pct * 100)}%`
 }
@@ -447,6 +486,7 @@ onBeforeUnmount(() => {
 }
 .card-btn:hover { transform: translateY(-1px); box-shadow: 0 10px 26px rgba(0,0,0,0.08); }
 .card-btn.active { border-color: rgba(47,111,78,0.55); box-shadow: 0 0 0 2px rgba(47,111,78,0.12) inset; }
+.card-btn.disabled { opacity: 0.55; }
 .txt .name { font-weight: 700; }
 .txt .desc { color: #6b665f; font-size: 12px; margin-top: 2px; }
 .cost { font-weight: 700; color: #6b665f; }
@@ -474,12 +514,60 @@ onBeforeUnmount(() => {
   background: radial-gradient(circle at 35% 35%, #d4ffda, #32c36a 55%, #1f8a70 92%);
   box-shadow: inset 0 -6px 10px rgba(0,0,0,0.12);
 }
+.plant-icon.repeater::after {
+  content: "";
+  position: absolute; inset: 6px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 35% 35%, #d4ffda, #32c36a 55%, #1f8a70 92%),
+    radial-gradient(circle at 70% 55%, rgba(255,255,255,0.75), transparent 45%);
+  box-shadow: inset 0 -6px 10px rgba(0,0,0,0.12);
+}
+.plant-icon.snowpea::after {
+  content: "";
+  position: absolute; inset: 6px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #e7fbff, #79d7ff 55%, #2b8ecb 92%);
+  box-shadow: 0 0 14px rgba(121, 215, 255, 0.35);
+}
+.plant-icon.twin_sunflower::after {
+  content: "";
+  position: absolute; inset: 6px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 45% 55%, #7a4b00 0 18%, transparent 19%),
+    radial-gradient(circle at 60% 45%, #7a4b00 0 18%, transparent 19%),
+    radial-gradient(circle at 35% 35%, #fff4b3, #ffd34d 45%, #f5a623 80%);
+  box-shadow: 0 0 14px rgba(255, 210, 90, 0.45);
+}
 .plant-icon.wallnut::after {
   content: "";
   position: absolute; inset: 7px;
   border-radius: 14px;
   background: linear-gradient(180deg, #d4a774, #a8723c);
   box-shadow: inset 0 -10px 16px rgba(0,0,0,0.18);
+}
+.plant-icon.cherrybomb::after {
+  content: "";
+  position: absolute; inset: 6px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #ffd2d2, #ff6b5b 55%, #c0392b 92%);
+  box-shadow: 0 0 16px rgba(255, 107, 91, 0.35);
+}
+.plant-icon.chomper::after {
+  content: "";
+  position: absolute; inset: 6px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #b7f0d2, #1f8a70);
+  box-shadow: inset 0 -10px 16px rgba(0,0,0,0.18);
+}
+.plant-icon.spikeweed::after {
+  content: "";
+  position: absolute; inset: 8px;
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, rgba(31,138,112,0.2), rgba(31,138,112,0.55)),
+    repeating-linear-gradient(45deg, rgba(255,255,255,0.35) 0 2px, transparent 2px 5px);
 }
 
 .tips { margin-top: 12px; color: #6b665f; font-size: 12px; display: grid; gap: 6px; }
@@ -496,7 +584,9 @@ onBeforeUnmount(() => {
 .chip.plant { border-color: rgba(47,111,78,0.35); }
 .chip.zombie { border-color: rgba(192,57,43,0.35); }
 .chip.pea { border-color: rgba(31,138,112,0.35); }
+.chip.ice { border-color: rgba(121, 215, 255, 0.6); }
 .chip.sun { border-color: rgba(199,164,91,0.45); }
+.chip.boom { border-color: rgba(255, 107, 91, 0.55); }
 .muted { color: #6b665f; font-size: 12px; }
 
 .lawn-stage {
@@ -541,8 +631,33 @@ onBeforeUnmount(() => {
 .plant.peashooter::after {
   background: radial-gradient(circle at 35% 35%, #d4ffda, #32c36a 55%, #1f8a70 92%);
 }
+.plant.repeater::after {
+  background:
+    radial-gradient(circle at 35% 35%, #d4ffda, #32c36a 55%, #1f8a70 92%),
+    radial-gradient(circle at 70% 55%, rgba(255,255,255,0.75), transparent 45%);
+}
+.plant.snowpea::after {
+  background: radial-gradient(circle at 35% 35%, #e7fbff, #79d7ff 55%, #2b8ecb 92%);
+}
+.plant.twin_sunflower::after {
+  background:
+    radial-gradient(circle at 45% 55%, #7a4b00 0 16%, transparent 17%),
+    radial-gradient(circle at 60% 45%, #7a4b00 0 16%, transparent 17%),
+    radial-gradient(circle at 35% 35%, #fff4b3, #ffd34d 45%, #f5a623 80%);
+}
 .plant.wallnut::after {
   background: linear-gradient(180deg, #d4a774, #a8723c);
+}
+.plant.cherrybomb::after {
+  background: radial-gradient(circle at 35% 35%, #ffd2d2, #ff6b5b 55%, #c0392b 92%);
+}
+.plant.chomper::after {
+  background: linear-gradient(180deg, #b7f0d2, #1f8a70);
+}
+.plant.spikeweed::after {
+  background:
+    linear-gradient(135deg, rgba(31,138,112,0.15), rgba(31,138,112,0.55)),
+    repeating-linear-gradient(45deg, rgba(255,255,255,0.35) 0 2px, transparent 2px 5px);
 }
 .hp {
   position: absolute; left: 6px; right: 6px; bottom: -8px;
@@ -561,6 +676,10 @@ onBeforeUnmount(() => {
   position: absolute;
   pointer-events: none;
 }
+.pea.snow {
+  background: radial-gradient(circle at 35% 35%, #e7fbff, #79d7ff 55%, #2b8ecb 92%);
+  box-shadow: 0 0 16px rgba(121, 215, 255, 0.45);
+}
 
 .zombie {
   width: 62px; height: 62px;
@@ -568,6 +687,9 @@ onBeforeUnmount(() => {
   pointer-events: none;
   filter: drop-shadow(0 12px 18px rgba(0,0,0,0.16));
   animation: bob 0.9s ease-in-out infinite;
+}
+.zombie.slowed .z-body {
+  background: linear-gradient(180deg, #7ab1d6, #4d7fa0);
 }
 @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
 .z-head {
@@ -588,6 +710,25 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 .z-hp-fill { height: 100%; background: linear-gradient(90deg, #c0392b, #ff6b5b); }
+
+.fx { position: absolute; pointer-events: none; }
+.fx.explosion {
+  width: 84px; height: 84px;
+  border-radius: 18px;
+  background: radial-gradient(circle at 50% 50%, rgba(255, 210, 90, 0.95), rgba(255, 107, 91, 0.55), transparent 70%);
+  filter: blur(0.2px);
+  animation: boom 0.28s ease-out forwards;
+}
+.fx.chomp {
+  width: 84px; height: 84px;
+  border-radius: 18px;
+  background: radial-gradient(circle at 50% 50%, rgba(183, 240, 210, 0.9), rgba(31, 138, 112, 0.35), transparent 70%);
+  animation: boom 0.28s ease-out forwards;
+}
+@keyframes boom {
+  from { transform: scale(0.55); opacity: 0.9; }
+  to { transform: scale(1.05); opacity: 0; }
+}
 
 .sun-token {
   position: absolute;

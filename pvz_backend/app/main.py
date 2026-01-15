@@ -8,7 +8,7 @@ from typing import Any, Dict
 from fastapi import APIRouter, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from .game import Game
+from .game import Game, PlantType
 
 
 app = FastAPI(title="PVZ Mini Backend", version="0.1.0")
@@ -89,7 +89,8 @@ async def pvz_ws(ws: WebSocket) -> None:
                     row = int(msg.get("row", -1))
                     col = int(msg.get("col", -1))
                     plant_type = str(msg.get("plantType", "peashooter"))
-                    if plant_type not in ("peashooter", "sunflower", "wallnut"):
+                    allowed: tuple[str, ...] = tuple(i["type"] for i in game.plant_catalog())
+                    if plant_type not in allowed:
                         await ws.send_json({"type": "ack", "action": "place", "ok": False, "error": "bad_plant_type"})
                         continue
                     result = game.place_plant(row=row, col=col, plant_type=plant_type)  # type: ignore[arg-type]
