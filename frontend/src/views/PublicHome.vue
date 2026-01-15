@@ -5,6 +5,7 @@
       <p>集借阅、预约、荐购、盘点、统计于一体的图书馆管理平台</p>
       <div class="actions">
         <RouterLink class="button-primary" to="/admin">进入管理后台</RouterLink>
+        <RouterLink class="button-primary" to="/pvz">玩一局 PVZ</RouterLink>
       </div>
     </div>
   </div>
